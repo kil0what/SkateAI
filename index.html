@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SkateAI — Jump Intelligence Lab</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="hero panel">
+        <div>
+          <p class="eyebrow">SkateAI / Prototype v2</p>
+          <h1>ИИ-судья для анализа прыжков в фигурном катании</h1>
+          <p class="hero-copy">
+            Более зрелая версия прототипа: модульная панель управления,
+            прозрачные эвристики, live-метрики, журнал событий и готовая база
+            для следующего этапа — датасета, ML-классификатора и системы
+            judging-grade.
+          </p>
+        </div>
+        <div class="hero-badges">
+          <span class="badge">MediaPipe Pose</span>
+          <span class="badge">Event Timeline</span>
+          <span class="badge">Judge HUD</span>
+          <span class="badge accent">Explainable Heuristics</span>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="workspace">
+          <div class="toolbar panel">
+            <label class="upload-field">
+              <span>Загрузить видео проката</span>
+              <input type="file" id="upload" accept="video/*" />
+            </label>
+            <div class="transport">
+              <button id="playBtn" disabled>▶ Старт</button>
+              <button id="pauseBtn" disabled>⏸ Пауза</button>
+              <button id="resetBtn" disabled>↺ Сброс</button>
+            </div>
+            <div class="engine-status">
+              <span class="status-dot" id="statusDot"></span>
+              <span id="log">ENGINE_READY</span>
+            </div>
+          </div>
+
+          <div class="video-grid">
+            <article class="video-panel panel">
+              <div class="panel-header">
+                <h2>Оригинал</h2>
+                <span id="videoMeta">Видео не загружено</span>
+              </div>
+              <div class="video-stage">
+                <video id="original-video" controls playsinline preload="metadata"></video>
+              </div>
+            </article>
+
+            <article class="video-panel panel analysis-panel">
+              <div class="panel-header">
+                <h2>Judge View</h2>
+                <span>Pose overlay + realtime scoring</span>
+              </div>
+              <div class="video-stage judge-stage">
+                <canvas id="canvas"></canvas>
+                <div class="hud">
+                  <div class="hud-label">CURRENT CALL</div>
+                  <div id="display" class="jump-card idle">IDLE</div>
+                  <div id="jump-details" class="jump-details">
+                    Загрузите видео, чтобы начать анализ.
+                  </div>
+                  <div class="score-strip">
+                    <div>
+                      <span class="mini-label">Уверенность</span>
+                      <strong id="confidenceValue">0%</strong>
+                    </div>
+                    <div>
+                      <span class="mini-label">Фаза</span>
+                      <strong id="phaseValue">Ожидание</strong>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <aside class="sidebar">
+          <section class="panel stats-panel">
+            <div class="panel-header">
+              <h2>Live метрики</h2>
+              <span>Explainable AI</span>
+            </div>
+            <div class="metrics-grid">
+              <div class="metric-card">
+                <span class="metric-label">Вертикальная скорость</span>
+                <strong id="metric-vy">0.000</strong>
+              </div>
+              <div class="metric-card">
+                <span class="metric-label">Ротация корпуса</span>
+                <strong id="metric-rot">0.0</strong>
+              </div>
+              <div class="metric-card">
+                <span class="metric-label">Наклон вперед</span>
+                <strong id="metric-lean">0.000</strong>
+              </div>
+              <div class="metric-card">
+                <span class="metric-label">Свинг ног</span>
+                <strong id="metric-swing">0.0</strong>
+              </div>
+              <div class="metric-card">
+                <span class="metric-label">Высота прыжка</span>
+                <strong id="metric-height">0.000</strong>
+              </div>
+              <div class="metric-card">
+                <span class="metric-label">Toe assist</span>
+                <strong id="metric-toe">Нет</strong>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel threshold-panel">
+            <div class="panel-header">
+              <h2>Настройки движка</h2>
+              <span>Регулируемые пороги</span>
+            </div>
+            <div class="slider-group">
+              <label>
+                <span>Порог взлета</span>
+                <output id="takeoffThresholdValue">0.12</output>
+              </label>
+              <input id="takeoffThreshold" type="range" min="0.05" max="0.25" step="0.01" value="0.12" />
+            </div>
+            <div class="slider-group">
+              <label>
+                <span>Порог приземления</span>
+                <output id="landingThresholdValue">-0.09</output>
+              </label>
+              <input id="landingThreshold" type="range" min="-0.2" max="-0.03" step="0.01" value="-0.09" />
+            </div>
+            <div class="slider-group">
+              <label>
+                <span>Чувствительность ротации</span>
+                <output id="rotationThresholdValue">0.18</output>
+              </label>
+              <input id="rotationThreshold" type="range" min="0.05" max="0.4" step="0.01" value="0.18" />
+            </div>
+            <p class="hint">
+              Эти настройки дают возможность быстро калибровать прототип под
+              разные ракурсы, качество видео и манеру катания.
+            </p>
+          </section>
+
+          <section class="panel panel-stack">
+            <div>
+              <div class="panel-header">
+                <h2>Состояние движка</h2>
+                <span>Realtime diagnostics</span>
+              </div>
+              <div id="debug" class="debug-box">Инициализация...</div>
+              <div id="metrics" class="info-box">
+                Ожидание видео для запуска модели.
+              </div>
+            </div>
+            <div>
+              <div class="panel-header">
+                <h2>Последние элементы</h2>
+                <span>Event timeline</span>
+              </div>
+              <ul id="jump-history" class="history-list">
+                <li>Журнал пока пуст.</li>
+              </ul>
+            </div>
+          </section>
+
+          <section class="panel roadmap-panel">
+            <div class="panel-header">
+              <h2>Что дальше</h2>
+              <span>Roadmap to pro level</span>
+            </div>
+            <ol>
+              <li>Собрать размеченный датасет заходов, взлетов и приземлений.</li>
+              <li>Добавить детекцию ребра, преротации и недокрута.</li>
+              <li>Перейти от эвристик к sequence-model классификатору.</li>
+              <li>Сделать экспорт judge report и техпанель для тренера.</li>
+            </ol>
+          </section>
+        </aside>
+      </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.min.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
