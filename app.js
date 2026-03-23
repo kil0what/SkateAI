@@ -323,11 +323,7 @@ function resetCanvas(ctx) {
 }
 
 function initApp() {
-  if (typeof Pose === 'undefined') {
-    ui.debug.textContent = 'Ошибка: MediaPipe Pose не загрузился.';
-    setLog('MEDIAPIPE_LOAD_ERROR');
-    return;
-  }
+  const poseAvailable = typeof Pose !== 'undefined' && typeof drawConnectors !== 'undefined' && typeof POSE_CONNECTIONS !== 'undefined';
 
   const detector = new JumpDetector({
     takeoffThreshold: Number(ui.takeoffThreshold.value),
@@ -336,17 +332,21 @@ function initApp() {
   });
 
   const ctx = ui.canvas.getContext('2d');
-  const pose = new Pose({
-    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`,
-  });
+  const pose = poseAvailable
+    ? new Pose({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`,
+      })
+    : null;
 
-  pose.setOptions({
-    modelComplexity: 1,
-    smoothLandmarks: true,
-    enableSegmentation: false,
-    minDetectionConfidence: 0.55,
-    minTrackingConfidence: 0.55,
-  });
+  if (pose) {
+    pose.setOptions({
+      modelComplexity: 1,
+      smoothLandmarks: true,
+      enableSegmentation: false,
+      minDetectionConfidence: 0.55,
+      minTrackingConfidence: 0.55,
+    });
+  }
 
   let processing = false;
   let lastObjectUrl = null;
@@ -364,8 +364,9 @@ function initApp() {
     input.addEventListener('input', syncDetectorConfig);
   });
 
-  pose.onResults((results) => {
-    if (!results.poseLandmarks || !processing) return;
+  if (pose) {
+    pose.onResults((results) => {
+      if (!results.poseLandmarks || !processing) return;
 
     if (ui.video.videoWidth && ui.video.videoHeight) {
       ui.canvas.width = ui.video.videoWidth;
@@ -396,15 +397,17 @@ function initApp() {
     ui.metrics.textContent = `Фаза: ${metrics.phase}. Высота: ${metrics.jumpHeight.toFixed(3)}. Toe assist: ${metrics.toePick ? 'обнаружен' : 'нет'}.`;
     ui.debug.textContent = `STATE: ${detector.isJumping ? 'AIRBORNE' : 'TRACKING'} | cooldown=${detector.cooldown} | frames=${detector.history.length}`;
 
-    if (jumpInfo) {
-      renderDecision(jumpInfo);
-    }
-  });
+      if (jumpInfo) {
+        renderDecision(jumpInfo);
+      }
+    });
+  }
 
   async function processFrame() {
     if (!processing || ui.video.paused || ui.video.ended) return;
 
     try {
+      if (!pose) return;
       await pose.send({ image: ui.video });
       window.requestAnimationFrame(processFrame);
     } catch (error) {
@@ -423,39 +426,49 @@ function initApp() {
       URL.revokeObjectURL(lastObjectUrl);
     }
 
-    const objectUrl = URL.createObjectURL(file);
-    lastObjectUrl = objectUrl;
-    ui.video.src = objectUrl;
-    ui.video.load();
     detector.reset();
     renderHistory([]);
     ui.display.textContent = 'IDLE';
     ui.display.className = 'jump-card idle';
     ui.jumpDetails.textContent = 'Видео загружено. Запустите воспроизведение для анализа.';
+    ui.videoMeta.textContent = `${file.name} · ${(file.size / (1024 * 1024)).toFixed(1)} MB`;
     setLog(`LOADING: ${file.name}`);
 
-    ui.video.onloadeddata = () => {
-      ui.canvas.width = ui.video.videoWidth;
-      ui.canvas.height = ui.video.videoHeight;
-      ui.videoMeta.textContent = `${ui.video.videoWidth}×${ui.video.videoHeight}`;
-      ui.debug.textContent = 'Готово к анализу. Нажмите «Старт».';
-      setLog('VIDEO_READY');
+    const handleLoaded = () => {
+      ui.canvas.width = ui.video.videoWidth || 1280;
+      ui.canvas.height = ui.video.videoHeight || 720;
+      ui.videoMeta.textContent = `${file.name} · ${ui.video.videoWidth}×${ui.video.videoHeight}`;
+      ui.debug.textContent = pose
+        ? 'Готово к анализу. Нажмите «Старт». '
+        : 'Видео готово к просмотру. AI-анализ недоступен, потому что MediaPipe не загрузился.';
+      setLog(pose ? 'VIDEO_READY' : 'VIDEO_READY_NO_AI');
       updateControls({ loaded: true, playing: false });
     };
 
-    ui.video.onerror = () => {
+    const handleError = () => {
       setLog('VIDEO_LOAD_ERROR');
-      ui.debug.textContent = 'Не удалось загрузить видео.';
+      ui.debug.textContent = `Не удалось загрузить видео «${file.name}». Возможно, браузер не поддерживает кодек этого файла.`;
     };
+
+    ui.video.addEventListener('loadedmetadata', handleLoaded, { once: true });
+    ui.video.addEventListener('error', handleError, { once: true });
+
+    const objectUrl = URL.createObjectURL(file);
+    lastObjectUrl = objectUrl;
+    ui.video.src = objectUrl;
+    ui.video.load();
   });
 
   ui.playBtn.addEventListener('click', async () => {
     if (!ui.video.src) return;
     await ui.video.play();
     processing = true;
-    setLog('DETECTING', true);
+    setLog(pose ? 'DETECTING' : 'PLAYBACK_ONLY', Boolean(pose));
+    ui.debug.textContent = pose
+      ? 'Идет анализ позы и прыжков.'
+      : 'Видео воспроизводится без AI-анализа: MediaPipe не загрузился.';
     updateControls({ loaded: true, playing: true });
-    processFrame();
+    if (pose) processFrame();
   });
 
   ui.pauseBtn.addEventListener('click', () => {
@@ -492,9 +505,9 @@ function initApp() {
   ui.video.addEventListener('play', () => {
     if (processing) return;
     processing = true;
-    setLog('DETECTING', true);
+    setLog(pose ? 'DETECTING' : 'PLAYBACK_ONLY', Boolean(pose));
     updateControls({ loaded: true, playing: true });
-    processFrame();
+    if (pose) processFrame();
   });
 
   ui.video.addEventListener('ended', () => {
@@ -506,8 +519,16 @@ function initApp() {
   updateThresholdLabels();
   updateMetrics(detector.createEmptyMetrics());
   renderHistory([]);
-  setLog('ENGINE_READY');
-  ui.debug.textContent = 'Universal detector ready. Загрузите видео проката.';
+
+  if (pose) {
+    setLog('ENGINE_READY');
+    ui.debug.textContent = 'Universal detector ready. Загрузите видео проката.';
+  } else {
+    setLog('VIDEO_READY_NO_AI');
+    ui.debug.textContent = 'MediaPipe не загрузился: загрузка и просмотр видео доступны, но AI-анализ отключен.';
+    ui.metrics.textContent = 'Диагностика доступна после загрузки MediaPipe. Проверьте интернет или откройте локальную копию библиотек.';
+  }
 }
+
 
 window.addEventListener('load', initApp);
